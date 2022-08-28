@@ -1,0 +1,32 @@
+{
+    "name": "icon-search",
+    "private": true,
+    "version": "0.0.0",
+    "type": "module",
+    "scripts": {
+        "dev": "vite",
+        "build": "vue-tsc --noEmit && vite build",
+        "preview": "vite preview"
+    },
+    "dependencies": {
+        "@tensorflow/tfjs": "^3.19.0",
+        "@types/lodash-es": "^4.17.6",
+        "@vicons/ionicons5": "^0.12.0",
+        "@vueuse/core": "^9.1.0",
+        "fabric": "^5.2.1",
+        "lodash-es": "^4.17.21",
+        "meetcode-ui": "^0.0.38",
+        "sass": "^1.54.5",
+        "seedrandom": "^3.0.5",
+        "vfonts": "^0.0.3",
+        "vue": "^3.2.37"
+    },
+    "devDependencies": {
+        "@types/fabric": "^4.5.11",
+        "@types/node": "^18.7.8",
+        "@vitejs/plugin-vue": "^3.0.2",
+        "typescript": "^4.6.4",
+        "vite": "^3.0.6",
+        "vue-tsc": "^0.39.5"
+    }
+}
