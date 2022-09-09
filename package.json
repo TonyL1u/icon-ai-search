@@ -1,5 +1,5 @@
 {
-    "name": "icon-search",
+    "name": "icon-ai-search",
     "private": true,
     "version": "0.0.0",
     "type": "module",
@@ -13,7 +13,7 @@
         "@types/lodash-es": "^4.17.6",
         "@vicons/ionicons5": "^0.12.0",
         "@vueuse/core": "^9.1.0",
-        "fabric": "^5.2.1",
+        "fabric": "^5.2.4",
         "lodash-es": "^4.17.21",
         "meetcode-ui": "^0.0.38",
         "sass": "^1.54.5",

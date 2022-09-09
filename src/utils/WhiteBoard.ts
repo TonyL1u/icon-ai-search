@@ -1,41 +1,33 @@
 import { tryOnMounted, createEventHook } from '@vueuse/core';
 import { fabric } from 'fabric';
 import type { EventHook } from '@vueuse/core';
+import { c } from 'meetcode-ui/es/_utils_';
 
 export type PauseableEventHookOn<T = any> = (fn: (param: T) => void) => { pause: () => void; resume: () => void };
 export type FabricEvent = 'object:added' | 'object:removed' | 'object:modified';
 export type FabricOriginalEventHandler = (fn: (param: fabric.IEvent) => void) => fabric.StaticCanvas;
 export type Plugin<T, A extends object = {}> = (context: WhiteBoard, options?: A) => T;
 export type DrawingType = 'paint' | 'line' | 'rect' | 'ellipse' | 'circle' | 'select';
+export type ExportFileExt = 'jpeg' | 'png' | 'svg' | 'json';
+export type ImportFileType = 'image' | 'svg' | 'json';
 export type WhiteBoardOptions = {
     drawingType?: DrawingType;
 } & fabric.ICanvasOptions;
+export interface ExportFileOptions {
+    ext: ExportFileExt;
+    keepImageBlank?: boolean;
+}
+export interface ImportFileOptions {
+    keepSvgBlank?: boolean;
+}
 
 const OBJECT_BASE_OPTIONS: fabric.IObjectOptions = {
+    fill: 'transparent',
+    stroke: '#000',
     selectable: false,
     strokeUniform: true,
     cornerSize: 8,
     strokeWidth: 1
-};
-const LINE_BASE_OPTIONS: fabric.ILineOptions = {
-    stroke: 'black',
-    strokeLineCap: 'round',
-    ...OBJECT_BASE_OPTIONS
-};
-const RECT_BASE_OPTIONS: fabric.IRectOptions = {
-    fill: 'transparent',
-    stroke: '#000',
-    ...OBJECT_BASE_OPTIONS
-};
-const ELLIPSE_BASE_OPTIONS: fabric.IEllipseOptions = {
-    fill: 'transparent',
-    stroke: '#000',
-    ...OBJECT_BASE_OPTIONS
-};
-const CIRCLE_BASE_OPTIONS: fabric.ICircleOptions = {
-    fill: 'transparent',
-    stroke: '#000',
-    ...OBJECT_BASE_OPTIONS
 };
 
 /**
@@ -77,11 +69,15 @@ abstract class EventEmitter {
 abstract class EventHooks extends EventEmitter {
     protected readonly readyEventHook = createEventHook<fabric.Canvas>();
     protected readonly clearedEventHook = createEventHook<fabric.Canvas>();
+    protected readonly groupedEventHook = createEventHook<fabric.Group>();
+    protected readonly ungroupedEventHook = createEventHook<fabric.ActiveSelection>();
     protected readonly fabricEventMap = new Map<FabricEvent, EventHook<Partial<fabric.IEvent>>>();
 
     // custom event
     onReady: PauseableEventHookOn<fabric.Canvas>;
     onCleared: PauseableEventHookOn<fabric.Canvas>;
+    onGrouped: PauseableEventHookOn<fabric.Group>;
+    onUngrouped: PauseableEventHookOn<fabric.ActiveSelection>;
 
     // fabric event
     onObjectAdded: PauseableEventHookOn<Partial<fabric.IEvent>>;
@@ -95,6 +91,8 @@ abstract class EventHooks extends EventEmitter {
 
         this.onReady = this.initHook(this.readyEventHook);
         this.onCleared = this.initHook(this.clearedEventHook);
+        this.onGrouped = this.initHook(this.groupedEventHook);
+        this.onUngrouped = this.initHook(this.ungroupedEventHook);
         this.onObjectAdded = this.initHook(this.fabricEventMap.get('object:added')!);
         this.onObjectRemoved = this.initHook(this.fabricEventMap.get('object:removed')!);
         this.onObjectModified = this.initHook(this.fabricEventMap.get('object:modified')!);
@@ -120,7 +118,6 @@ export class WhiteBoard extends EventHooks {
     private startPoint: fabric.Point | null = null;
     private currentObject: fabric.Line | fabric.Rect | fabric.Ellipse | fabric.Circle | null = null;
     private isMouseDown: boolean = false;
-    // fabric = fabric;
 
     /**
      * Constructor
@@ -133,14 +130,21 @@ export class WhiteBoard extends EventHooks {
         this.options = options;
         tryOnMounted(() => {
             this.canvas = new fabric.Canvas(selector, {
-                selectionLineWidth: 1,
                 skipTargetFind: true,
-                hoverCursor: 'auto',
                 ...this.options
             });
             this.createCanvasEvent();
             this.setType('select');
             this.readyEventHook.trigger(this.canvas);
+
+            fabric.loadSVGFromURL('../../src/assets/vue.svg', (objects, options) => {
+                const obj = fabric.util.groupSVGElements(objects, options) as fabric.Object;
+                const { left, top } = this.canvas?.getCenter()!;
+                const { x, y } = obj.getCenterPoint();
+                obj.set('left', left - x);
+                obj.set('top', top - y);
+                this.add(obj);
+            });
         });
     }
 
@@ -165,6 +169,10 @@ export class WhiteBoard extends EventHooks {
         this.canvas.isDrawingMode = type === 'paint';
         this.discardActiveObject();
         this.requestRenderAll();
+    }
+
+    setStroke(width: number) {
+        OBJECT_BASE_OPTIONS.strokeWidth = width;
     }
 
     add(...object: fabric.Object[]) {
@@ -195,8 +203,9 @@ export class WhiteBoard extends EventHooks {
         const target = this.canvas?.getActiveObject();
 
         if (target && target.type === 'activeSelection') {
-            (target as fabric.ActiveSelection).toGroup();
+            const group = (target as fabric.ActiveSelection).toGroup();
             this.requestRenderAll();
+            this.groupedEventHook.trigger(group);
         }
     }
 
@@ -204,9 +213,14 @@ export class WhiteBoard extends EventHooks {
         const target = this.canvas?.getActiveObject();
 
         if (target && target.type === 'group') {
-            (this.getActiveObject() as fabric.Group)?.toActiveSelection();
+            const sel = (this.getActiveObject() as fabric.Group)?.toActiveSelection();
             this.requestRenderAll();
+            this.ungroupedEventHook.trigger(sel);
         }
+    }
+
+    getObjects() {
+        return this.canvas?.getObjects();
     }
 
     getActiveObject() {
@@ -247,6 +261,74 @@ export class WhiteBoard extends EventHooks {
         return plugin.call(this, this, options);
     }
 
+    export(name: string, options: ExportFileOptions) {
+        const { ext, keepImageBlank = true } = options;
+        const reg = name.match(/(.*)\/(.*)/);
+        const format = ext ?? reg?.[2] ?? 'png';
+        const file = ext ? name : `${name}.${format}`;
+
+        switch (format) {
+            case 'svg':
+                this.exportAsSvg(file);
+
+                break;
+            case 'json':
+                this.exportAsJson(file);
+
+                break;
+            default:
+                let target: fabric.Canvas | fabric.Group | null = null;
+                if (keepImageBlank || this.isEmpty) {
+                    target = this.getCanvas();
+                } else {
+                    const clonedObjects: fabric.Object[] = [];
+                    this.getObjects()?.forEach(obj => obj.clone((cloned: fabric.Object) => clonedObjects.push(cloned)));
+                    target = new fabric.Group(clonedObjects);
+                }
+
+                target && this.exportAsImage(file, format, target);
+                break;
+        }
+    }
+
+    import(type: ImportFileType, options: ImportFileOptions = {}) {
+        const { keepSvgBlank = false } = options;
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = type === 'image' ? '.png, .jpeg' : `.${type}`;
+        const fileUploaded = (e: Event) => {
+            const file = (e.target as HTMLInputElement).files?.[0];
+            if (file) {
+                switch (type) {
+                    case 'image':
+                        this.importAsImage(file);
+
+                        break;
+                    case 'svg':
+                        this.importAsSvg(file, keepSvgBlank);
+
+                        break;
+                    case 'json':
+                        this.importAsJson(file);
+
+                        break;
+                }
+            }
+        };
+        window.addEventListener(
+            'focus',
+            () => {
+                setTimeout(() => {
+                    input.removeEventListener('change', fileUploaded);
+                }, 500);
+            },
+            { once: true }
+        );
+
+        input.addEventListener('change', fileUploaded, { once: true });
+        input.click();
+    }
+
     /**
      * Current active object on canvas
      */
@@ -266,8 +348,100 @@ export class WhiteBoard extends EventHooks {
         return this.options.drawingType === 'select';
     }
 
+    get isEmpty() {
+        return this.canvas?.getObjects().length === 0;
+    }
+
     private get mouseEventDisabled() {
         return !this.canvas || this.hasActiveObject || this.isDrawingMode || this.isSelectMode;
+    }
+
+    private exportAsImage(file: string, format: string, target: fabric.Group | fabric.Canvas) {
+        const link = document.createElement('a');
+        const base64 = target.toDataURL({ format, enableRetinaScaling: true }) ?? '';
+
+        if (base64) {
+            link.href = base64;
+            link.download = file;
+            link.click();
+        }
+    }
+
+    private exportAsSvg(file: string) {
+        const link = document.createElement('a');
+        const svg = this.canvas?.toSVG() ?? '';
+        const blob = new Blob([svg], { type: 'image/svg+xml' });
+        const blobURL = URL.createObjectURL(blob);
+
+        if (blobURL) {
+            link.href = blobURL;
+            link.download = file;
+            link.click();
+            URL.revokeObjectURL(blobURL);
+        }
+    }
+
+    private async exportAsJson(file: string) {
+        const link = document.createElement('a');
+        const json = this.canvas?.toDatalessJSON(['clipPath', 'eraser']);
+        const out = JSON.stringify(json, null, '\t');
+        const blob = new Blob([out], { type: 'application/json' });
+        const clipboardItemData = { [blob.type]: blob };
+        try {
+            navigator.clipboard && (await navigator.clipboard.write([new ClipboardItem(clipboardItemData)]));
+        } catch (error) {
+            console.log(error);
+        }
+        const blobURL = URL.createObjectURL(blob);
+
+        if (blobURL) {
+            link.href = blobURL;
+            link.download = file;
+            link.click();
+            URL.revokeObjectURL(blobURL);
+        }
+    }
+
+    private importAsImage(file: File) {
+        const blobURL = URL.createObjectURL(file);
+
+        fabric.Image.fromURL(blobURL, img => {
+            img.scale(0.5);
+            const { left, top } = this.canvas?.getCenter()!;
+            const { x, y } = img.getCenterPoint();
+            img.set('left', left - x);
+            img.set('top', top - y);
+            this.add(img);
+
+            URL.revokeObjectURL(blobURL);
+        });
+    }
+
+    private importAsSvg(file: File, keepBlank: boolean) {
+        const blobURL = URL.createObjectURL(file);
+
+        fabric.loadSVGFromURL(blobURL, (objects, options, elements?: HTMLElement[], allElements?: HTMLElement[]) => {
+            let target: fabric.Object;
+            if (keepBlank) {
+                target = fabric.util.groupSVGElements(objects, options);
+            } else {
+                const isCreateByFabric = !!allElements?.[0].innerHTML.includes('Created with Fabric.js');
+                target = new fabric.Group(objects.slice(+isCreateByFabric));
+            }
+            this.add(target);
+
+            URL.revokeObjectURL(blobURL);
+        });
+    }
+
+    private importAsJson(file: File) {
+        const reader = new FileReader();
+        reader.readAsText(file, 'utf-8');
+        reader.onload = e => {
+            const currentObjects = this.canvas?.toObject();
+            currentObjects.objects = [...currentObjects.objects, ...(JSON.parse((e.target?.result as string) ?? '{}').objects ?? [])];
+            this.canvas?.loadFromJSON(JSON.stringify(currentObjects), () => {});
+        };
     }
 
     private listenEvent(evt: FabricEvent) {
@@ -290,7 +464,11 @@ export class WhiteBoard extends EventHooks {
             const { x, y } = this.startPoint;
             switch (drawingType) {
                 case 'line':
-                    this.currentObject = new fabric.Line([x, y, x, y], LINE_BASE_OPTIONS);
+                    this.currentObject = new fabric.Line([x, y, x, y], {
+                        ...OBJECT_BASE_OPTIONS,
+                        stroke: 'black',
+                        strokeLineCap: 'round'
+                    });
 
                     break;
                 case 'rect':
@@ -299,7 +477,7 @@ export class WhiteBoard extends EventHooks {
                         left: x,
                         width: 0,
                         height: 0,
-                        ...RECT_BASE_OPTIONS
+                        ...OBJECT_BASE_OPTIONS
                     });
 
                     break;
@@ -309,7 +487,7 @@ export class WhiteBoard extends EventHooks {
                         left: x,
                         rx: 0,
                         ry: 0,
-                        ...ELLIPSE_BASE_OPTIONS
+                        ...OBJECT_BASE_OPTIONS
                     });
 
                     break;
@@ -318,7 +496,7 @@ export class WhiteBoard extends EventHooks {
                         top: y,
                         left: x,
                         radius: 0,
-                        ...CIRCLE_BASE_OPTIONS
+                        ...OBJECT_BASE_OPTIONS
                     });
                     this.currentObject.setControlsVisibility({
                         mtr: false,
@@ -472,7 +650,3 @@ export class WhiteBoard extends EventHooks {
         return new fabric.Circle(options);
     }
 }
-
-export class Rect extends fabric.Rect {}
-
-export class Circle extends fabric.Circle {}

@@ -1,8 +1,10 @@
 <script setup lang="ts">
 // This starter template is using Vue 3 <script setup> SFCs
 // Check out https://vuejs.org/api/sfc-script-setup.html#script-setup
-import { McSpace, McButton, McPopconfirm, McMessage } from 'meetcode-ui';
+import { ref } from 'vue';
+import { McSpace, McButton, McPopconfirm, McMessage, McInput, McInputGroup, McPopselect } from 'meetcode-ui';
 import { WhiteBoard, Copy, Redo } from './utils';
+import type { ExportFileExt, ImportFileType } from './utils/WhiteBoard';
 // import * as tf from '@tensorflow/tfjs';
 
 // const model = tf.sequential();
@@ -27,10 +29,28 @@ import { WhiteBoard, Copy, Redo } from './utils';
 // const { copy, paste } = use(copyPlugin);
 // render('canvas');
 
-const whiteBoard = new WhiteBoard('canvas');
+const whiteBoard = new WhiteBoard('canvas', {
+    hoverCursor: 'auto',
+    backgroundColor: '#fff'
+});
 const { copy, paste, onCopy } = whiteBoard.use(Copy);
 const { redo, undo } = whiteBoard.use(Redo);
+const fileName = ref('');
+const exportExt = ref<ExportFileExt>('png');
 
+const handleImport = (type: ImportFileType) => {
+    whiteBoard.import(type, { keepSvgBlank: false });
+};
+const handleExport = () => {
+    if (!fileName.value) {
+        McMessage.error('请输入文件名');
+    } else {
+        whiteBoard.export(fileName.value, {
+            ext: exportExt.value,
+            keepImageBlank: false
+        });
+    }
+};
 onCopy(() => {
     McMessage.success('已复制');
 });
@@ -54,6 +74,35 @@ onCopy(() => {
         <McPopconfirm content="清空后无法恢复，是否继续？" @confirm="whiteBoard.clear()">
             <McButton>清空</McButton>
         </McPopconfirm>
+        <McInput :input-limits="['number']" placeholder="笔宽" @change="val => whiteBoard.setStroke(+val)" />
+        <McPopselect
+            :options="[
+                { label: '从图片导入', value: 'image' },
+                { label: '从SVG导入', value: 'svg' },
+                { label: '从JSON导入', value: 'json' }
+            ]"
+            :with-arrow="false"
+            @select="handleImport"
+        >
+            <McButton>导入</McButton>
+        </McPopselect>
+        <McInputGroup>
+            <McInput v-model:value="fileName" placeholder="请输入文件名" clearable />
+            <McPopselect
+                v-model:value="exportExt"
+                :options="[
+                    { label: '.png', value: 'png' },
+                    { label: '.jpeg', value: 'jpeg' },
+                    { label: '.svg', value: 'svg' },
+                    { label: '.json', value: 'json' }
+                ]"
+                :with-arrow="false"
+                trigger="click"
+            >
+                <McButton>.{{ exportExt }}</McButton>
+            </McPopselect>
+            <McButton @click="handleExport">导出</McButton>
+        </McInputGroup>
     </McSpace>
     <canvas id="canvas" width="1200" height="600" style="border: 1px solid" />
 </template>

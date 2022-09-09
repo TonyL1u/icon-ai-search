@@ -1,11 +1,10 @@
-import { watch, nextTick } from 'vue';
+import { watch } from 'vue';
 import { useMagicKeys } from '@vueuse/core';
-import { WhiteBoard, Circle } from '../WhiteBoard';
-import Copy from './copy';
+import { WhiteBoard } from '../WhiteBoard';
 import type { Plugin } from '../WhiteBoard';
 
 interface Snapshot {
-    action: 'add' | 'remove' | 'scaleX' | 'scaleY' | 'scale' | 'drag' | 'rotate';
+    action: 'add' | 'remove' | 'scaleX' | 'scaleY' | 'scale' | 'drag' | 'rotate' | 'group' | 'ungroup';
     target: fabric.Object;
     original?: Record<string, any>;
     // data: WeakMap<fabric.Object, Record<string, any>>;
@@ -38,6 +37,24 @@ const RedoPlugin: Plugin<RedoPluginReturn, RedoPluginOptions> = function (contex
         redoSnapshot.length = 0;
         undoSnapshot.length = 0;
     });
+
+    // const { pause: pauseGroup, resume: resumeGroup } = context.onGrouped(target => {
+    //     if (target) {
+    //         recordRedo({
+    //             action: 'group',
+    //             target
+    //         });
+    //     }
+    // });
+
+    // const { pause: pauseUngroup, resume: resumeUngroup } = context.onUngrouped(target => {
+    //     if (target) {
+    //         recordRedo({
+    //             action: 'ungroup',
+    //             target
+    //         });
+    //     }
+    // });
 
     context.onObjectModified(options => {
         const { target } = options;
@@ -73,8 +90,12 @@ const RedoPlugin: Plugin<RedoPluginReturn, RedoPluginOptions> = function (contex
         const snapshot = redoSnapshot.pop();
 
         if (snapshot) {
+            // pause listen
             pauseRemove();
             pauseAdd();
+            // pauseGroup();
+            // pauseUngroup();
+
             let undoOriginal = {};
             const { action, original, target } = snapshot;
 
@@ -91,6 +112,14 @@ const RedoPlugin: Plugin<RedoPluginReturn, RedoPluginOptions> = function (contex
                             context.setActiveObject(sel);
                         }
                     });
+
+                    break;
+                case 'group':
+                    context.ungroup();
+
+                    break;
+                case 'ungroup':
+                    context.group();
 
                     break;
                 default:
@@ -114,6 +143,8 @@ const RedoPlugin: Plugin<RedoPluginReturn, RedoPluginOptions> = function (contex
             });
             context.requestRenderAll();
 
+            // resumeUngroup();
+            // resumeGroup();
             resumeAdd();
             resumeRemove();
         }
@@ -124,6 +155,9 @@ const RedoPlugin: Plugin<RedoPluginReturn, RedoPluginOptions> = function (contex
         if (snapshot) {
             pauseRemove();
             pauseAdd();
+            // pauseGroup();
+            // pauseUngroup();
+
             let redoOriginal = {};
             const { action, target, original } = snapshot;
 
@@ -141,6 +175,14 @@ const RedoPlugin: Plugin<RedoPluginReturn, RedoPluginOptions> = function (contex
                     WhiteBoard.selectionTransform(target, obj => context.remove(obj));
                     context.discardActiveObject();
                     resumeRemove();
+
+                    break;
+                case 'group':
+                    context.group();
+
+                    break;
+                case 'ungroup':
+                    context.ungroup();
 
                     break;
                 default:
@@ -167,6 +209,8 @@ const RedoPlugin: Plugin<RedoPluginReturn, RedoPluginOptions> = function (contex
             );
             context.requestRenderAll();
 
+            // resumeUngroup();
+            // resumeGroup();
             resumeAdd();
             resumeRemove();
         }
